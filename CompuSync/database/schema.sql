@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS utilisateurs (
     INDEX idx_email (email)
 );
 
+
 -- 3. Table pour le chaos meter
 CREATE TABLE IF NOT EXISTS chaos_meter (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -72,3 +73,40 @@ CREATE TABLE IF NOT EXISTS messages_chat (
     FOREIGN KEY (user_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
     INDEX idx_date (date_envoi)
 );
+
+CREATE TABLE IF NOT EXISTS password_resets (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(150) NOT NULL,
+    token VARCHAR(64) NOT NULL,
+    expiration DATETIME NOT NULL,
+    used BOOLEAN DEFAULT FALSE,
+    date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_token (token),
+    INDEX idx_email (email)
+);
+
+CREATE TABLE IF NOT EXISTS reclamation_reactions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    reclamation_id INT NOT NULL,
+    reaction_type ENUM('agree', 'laugh', 'sad') NOT NULL,
+    date_reaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    FOREIGN KEY (reclamation_id) REFERENCES reclamations(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_reaction (user_id, reclamation_id),
+    INDEX idx_reclamation (reclamation_id)
+);
+
+ALTER TABLE utilisateurs 
+ADD COLUMN role ENUM('student', 'admin') DEFAULT 'student' AFTER email;
+
+
+ALTER TABLE annonces 
+ADD COLUMN created_by INT AFTER id,
+ADD FOREIGN KEY (created_by) REFERENCES utilisateurs(id) ON DELETE SET NULL;
+
+
+ALTER TABLE utilisateurs ADD INDEX idx_role (role);
+
+INSERT INTO utilisateurs (nom, prenom, email, role, mot_de_passe) 
+VALUES ('Admin', 'Principal', 'admin@campusync.com', 'admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi');

@@ -8,13 +8,28 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $user_id = $_SESSION['user_id'];
+$vote_message = '';
+
+// Vérifier si l'utilisateur a déjà voté aujourd'hui
+$stmt = $pdo->prepare("
+    SELECT COUNT(*) as count 
+    FROM chaos_meter 
+    WHERE user_id = ? 
+    AND DATE(date_enregistrement) = CURDATE()
+");
+$stmt->execute([$user_id]);
+$has_voted_today = $stmt->fetch(PDO::FETCH_ASSOC)['count'] > 0;
 
 // Traiter la mise à jour du chaos meter
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_chaos'])) {
-    $stmt = $pdo->prepare("INSERT INTO chaos_meter (user_id, changement) VALUES (?, ?)");
-    $stmt->execute([$user_id, intval($_POST['changement'])]);
-    header("Location: dashboard.php");
-    exit();
+    if ($has_voted_today) {
+        $vote_message = "You've already voted today! Come back tomorrow.";
+    } else {
+        $stmt = $pdo->prepare("INSERT INTO chaos_meter (user_id, changement) VALUES (?, ?)");
+        $stmt->execute([$user_id, intval($_POST['changement'])]);
+        header("Location: dashboard.php");
+        exit();
+    }
 }
 
 // Statistiques
@@ -43,13 +58,14 @@ if ($chaos_level < 30) {
     $chaosStatus = ['text' => 'High Chaos', 'color' => '#ef4444'];
 }
 
-// Top complaint du jour
+// Top complaint du jour (avec le plus de réactions)
 $stmt = $pdo->query("
-    SELECT categorie, description 
-    FROM reclamations 
-    WHERE statut = 'active' 
-    AND DATE(date_creation) = CURDATE()
-    ORDER BY date_creation DESC 
+    SELECT r.categorie, r.description,
+    (SELECT COUNT(*) FROM reclamation_reactions WHERE reclamation_id = r.id) as total_reactions
+    FROM reclamations r
+    WHERE r.statut = 'active' 
+    AND DATE(r.date_creation) = CURDATE()
+    ORDER BY total_reactions DESC, r.date_creation DESC
     LIMIT 1
 ");
 $top_complaint = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -92,14 +108,36 @@ $top_complaint = $stmt->fetch(PDO::FETCH_ASSOC);
                         <p style="color: rgba(232, 232, 240, 0.7);">Current Status: <strong
                                 style="color: <?php echo $chaosStatus['color']; ?>;"><?php echo $chaosStatus['text']; ?></strong></p>
 
-                        <div class="mood-buttons">
-                            <button class="mood-btn stressed" onclick="updateChaos(5)">
-                                <span>😭</span> I'm stressed
-                            </button>
-                            <button class="mood-btn happy" onclick="updateChaos(-5)">
-                                <span>🙂</span> Today is fine
-                            </button>
+                        <?php if (!empty($vote_message)): ?>
+                        <div style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); color: #fbbf24; padding: 12px; border-radius: 8px; margin: 15px 0; text-align: center;">
+                            ⚠️ <?php echo $vote_message; ?>
                         </div>
+                        <?php endif; ?>
+
+                        <?php if ($has_voted_today): ?>
+                        <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); padding: 20px; border-radius: 12px; text-align: center; margin-top: 15px;">
+                            <p style="color: rgba(232, 232, 240, 0.8); margin: 0;">
+                                ✓ Thanks for voting today! Come back tomorrow to share your mood.
+                            </p>
+                        </div>
+                        <?php else: ?>
+                        <div class="mood-buttons">
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="update_chaos" value="1">
+                                <input type="hidden" name="changement" value="5">
+                                <button type="submit" class="mood-btn stressed">
+                                    <span>😭</span> I'm stressed
+                                </button>
+                            </form>
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="update_chaos" value="1">
+                                <input type="hidden" name="changement" value="-5">
+                                <button type="submit" class="mood-btn happy">
+                                    <span>🙂</span> Today is fine
+                                </button>
+                            </form>
+                        </div>
+                        <?php endif; ?>
                     </div>
 
                     <!-- Stats Grid -->
@@ -131,6 +169,7 @@ $top_complaint = $stmt->fetch(PDO::FETCH_ASSOC);
                     <div class="stat-card" style="text-align: left; margin-top: 15px;">
                         <p><strong>Category:</strong> <span style="color: #6366f1;"><?php echo htmlspecialchars($top_complaint['categorie']); ?></span></p>
                         <p style="margin: 15px 0; color: rgba(232, 232, 240, 0.8);"><em>"<?php echo htmlspecialchars($top_complaint['description']); ?>"</em></p>
+                        <p style="color: rgba(232, 232, 240, 0.6);">🔥 <?php echo $top_complaint['total_reactions']; ?> Total Reactions</p>
                     </div>
                     <?php else: ?>
                     <div class="stat-card" style="text-align: left; margin-top: 15px;">

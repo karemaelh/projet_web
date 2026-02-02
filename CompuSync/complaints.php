@@ -9,8 +9,31 @@ if (!isset($_SESSION['user_id'])) {
 
 $user_id = $_SESSION['user_id'];
 
-// Traiter la soumission
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// Traiter les réactions
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['react'])) {
+    $reclamation_id = intval($_POST['reclamation_id']);
+    $reaction_type = $_POST['reaction_type'];
+    
+    // Vérifier si l'utilisateur a déjà réagi
+    $stmt = $pdo->prepare("SELECT id FROM reclamation_reactions WHERE user_id = ? AND reclamation_id = ?");
+    $stmt->execute([$user_id, $reclamation_id]);
+    
+    if ($stmt->fetch()) {
+        // Mettre à jour la réaction
+        $stmt = $pdo->prepare("UPDATE reclamation_reactions SET reaction_type = ? WHERE user_id = ? AND reclamation_id = ?");
+        $stmt->execute([$reaction_type, $user_id, $reclamation_id]);
+    } else {
+        // Ajouter une nouvelle réaction
+        $stmt = $pdo->prepare("INSERT INTO reclamation_reactions (user_id, reclamation_id, reaction_type) VALUES (?, ?, ?)");
+        $stmt->execute([$user_id, $reclamation_id, $reaction_type]);
+    }
+    
+    header("Location: complaints.php");
+    exit();
+}
+
+// Traiter la soumission de réclamation
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['react'])) {
     $stmt = $pdo->prepare("INSERT INTO reclamations (user_id, categorie, description, mood, anonyme) VALUES (?, ?, ?, ?, ?)");
     $stmt->execute([
         $user_id,
@@ -23,9 +46,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit();
 }
 
-// Récupérer les réclamations
+// Récupérer les réclamations avec le nombre de réactions
 $stmt = $pdo->query("
-    SELECT r.*, u.nom, u.prenom 
+    SELECT r.*, u.nom, u.prenom,
+    (SELECT COUNT(*) FROM reclamation_reactions WHERE reclamation_id = r.id AND reaction_type = 'agree') as agree_count,
+    (SELECT COUNT(*) FROM reclamation_reactions WHERE reclamation_id = r.id AND reaction_type = 'laugh') as laugh_count,
+    (SELECT COUNT(*) FROM reclamation_reactions WHERE reclamation_id = r.id AND reaction_type = 'sad') as sad_count
     FROM reclamations r
     LEFT JOIN utilisateurs u ON r.user_id = u.id
     WHERE r.statut = 'active'
@@ -33,6 +59,14 @@ $stmt = $pdo->query("
     LIMIT 10
 ");
 $reclamations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Récupérer les réactions de l'utilisateur actuel
+$stmt = $pdo->prepare("SELECT reclamation_id, reaction_type FROM reclamation_reactions WHERE user_id = ?");
+$stmt->execute([$user_id]);
+$user_reactions = [];
+while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    $user_reactions[$row['reclamation_id']] = $row['reaction_type'];
+}
 ?>
 <!DOCTYPE HTML>
 <html>
@@ -45,6 +79,29 @@ $reclamations = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <script src="files/scripts.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        .reaction-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 8px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.1em;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .reaction-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: scale(1.05);
+        }
+        
+        .reaction-btn.active {
+            background: rgba(99, 102, 241, 0.3);
+            border-color: #6366f1;
+        }
     </style>
 </head>
 
@@ -115,10 +172,40 @@ $reclamations = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <p style="margin: 15px 0; color: rgba(232, 232, 240, 0.8);">
                             <em>"<?php echo htmlspecialchars($r['description']); ?>"</em>
                         </p>
-                        <p style="color: rgba(232, 232, 240, 0.6);">
+                        <p style="color: rgba(232, 232, 240, 0.6); margin-bottom: 15px;">
                             <?php if (!$r['anonyme']) echo $r['prenom'] . ' ' . substr($r['nom'], 0, 1) . '. • '; ?>
                             <?php echo date('M d, Y', strtotime($r['date_creation'])); ?>
                         </p>
+                        
+                        <!-- Reactions -->
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="react" value="1">
+                                <input type="hidden" name="reclamation_id" value="<?php echo $r['id']; ?>">
+                                <input type="hidden" name="reaction_type" value="agree">
+                                <button type="submit" class="reaction-btn <?php echo isset($user_reactions[$r['id']]) && $user_reactions[$r['id']] == 'agree' ? 'active' : ''; ?>">
+                                    👍 <span><?php echo $r['agree_count']; ?></span>
+                                </button>
+                            </form>
+                            
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="react" value="1">
+                                <input type="hidden" name="reclamation_id" value="<?php echo $r['id']; ?>">
+                                <input type="hidden" name="reaction_type" value="laugh">
+                                <button type="submit" class="reaction-btn <?php echo isset($user_reactions[$r['id']]) && $user_reactions[$r['id']] == 'laugh' ? 'active' : ''; ?>">
+                                    😂 <span><?php echo $r['laugh_count']; ?></span>
+                                </button>
+                            </form>
+                            
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="react" value="1">
+                                <input type="hidden" name="reclamation_id" value="<?php echo $r['id']; ?>">
+                                <input type="hidden" name="reaction_type" value="sad">
+                                <button type="submit" class="reaction-btn <?php echo isset($user_reactions[$r['id']]) && $user_reactions[$r['id']] == 'sad' ? 'active' : ''; ?>">
+                                    😭 <span><?php echo $r['sad_count']; ?></span>
+                                </button>
+                            </form>
+                        </div>
                     </div>
                     <?php endforeach; ?>
                 </article>
